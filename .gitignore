@@ -1,0 +1,27 @@
+# Go binaries and build output
+/bin/
+/build/
+/dist/
+*.exe
+*.out
+*.test
+*.prof
+
+# Dependency directories
+/vendor/
+/Godeps/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+*.env
+
+# System files
+.DS_Store
+Thumbs.db
