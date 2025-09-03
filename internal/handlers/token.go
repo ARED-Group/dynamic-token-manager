@@ -3,180 +3,85 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"time"
 
-	"github.com/ARED-Group/dynamic-token-manager/internal/config"
 	"github.com/ARED-Group/dynamic-token-manager/internal/models"
 	"github.com/ARED-Group/dynamic-token-manager/internal/services"
 )
 
-// TokenHandler handles token-related HTTP requests
 type TokenHandler struct {
-	tokenService *services.TokenService
-	config       *config.Config
+	tokenService  *services.TokenService
+	deviceService *services.DeviceService
 }
 
-// NewTokenHandler creates a new token handler
-func NewTokenHandler(cfg *config.Config) *TokenHandler {
+func NewTokenHandler(tokenService *services.TokenService, deviceService *services.DeviceService) *TokenHandler {
 	return &TokenHandler{
-		tokenService: services.NewTokenService(cfg),
-		config:       cfg,
+		tokenService:  tokenService,
+		deviceService: deviceService,
 	}
 }
 
-// CreateToken creates a new token
-func (h *TokenHandler) CreateToken(w http.ResponseWriter, r *http.Request) {
-	var req models.CreateTokenRequest
+// GenerateToken handles token generation requests
+func (h *TokenHandler) GenerateToken(w http.ResponseWriter, r *http.Request) {
+	var req models.TokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid request body", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	// Validate request
-	if err := req.Validate(); err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Validation failed", err)
-		return
+	// Get device serial from context (set by middleware)
+	if deviceSerial, ok := r.Context().Value("device_serial").(string); ok {
+		req.DeviceSerial = deviceSerial
 	}
 
-	token, err := h.tokenService.CreateToken(&req)
+	token, err := h.tokenService.GenerateToken(&req)
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to create token", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	h.writeSuccessResponse(w, http.StatusCreated, token)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(token)
 }
 
-// RefreshToken refreshes an existing token
-func (h *TokenHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
-	var req models.RefreshTokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid request body", err)
-		return
-	}
-
-	token, err := h.tokenService.RefreshToken(req.RefreshToken)
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusUnauthorized, "Failed to refresh token", err)
-		return
-	}
-
-	h.writeSuccessResponse(w, http.StatusOK, token)
-}
-
-// ValidateToken validates a token
+// ValidateToken handles token validation requests
 func (h *TokenHandler) ValidateToken(w http.ResponseWriter, r *http.Request) {
-	var req models.ValidateTokenRequest
+	var req struct {
+		Token string `json:"token"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid request body", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	isValid, claims, err := h.tokenService.ValidateToken(req.Token)
+	claims, err := h.tokenService.ValidateToken(req.Token)
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusUnauthorized, "Token validation failed", err)
+		http.Error(w, "Invalid token", http.StatusUnauthorized)
 		return
 	}
 
-	response := models.ValidateTokenResponse{
-		Valid:  isValid,
-		Claims: claims,
-	}
-
-	h.writeSuccessResponse(w, http.StatusOK, response)
-}
-
-// RevokeToken revokes a token
-func (h *TokenHandler) RevokeToken(w http.ResponseWriter, r *http.Request) {
-	var req models.RevokeTokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid request body", err)
-		return
-	}
-
-	err := h.tokenService.RevokeToken(req.Token)
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to revoke token", err)
-		return
-	}
-
-	h.writeSuccessResponse(w, http.StatusOK, map[string]string{
-		"message": "Token revoked successfully",
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"valid":  true,
+		"claims": claims,
 	})
 }
 
-// ListTokens lists all active tokens for a user
-func (h *TokenHandler) ListTokens(w http.ResponseWriter, r *http.Request) {
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		h.writeErrorResponse(w, http.StatusBadRequest, "user_id parameter is required", nil)
+// RefreshToken handles token refresh requests
+func (h *TokenHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	tokens, err := h.tokenService.ListTokens(userID)
+	newToken, err := h.tokenService.RefreshToken(req.Token)
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to list tokens", err)
+		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
-	h.writeSuccessResponse(w, http.StatusOK, map[string]interface{}{
-		"tokens": tokens,
-		"count":  len(tokens),
-	})
-}
-
-// GetTokenInfo gets information about the current token
-func (h *TokenHandler) GetTokenInfo(w http.ResponseWriter, r *http.Request) {
-	// Extract token from Authorization header
-	token := r.Header.Get("Authorization")
-	if token == "" {
-		h.writeErrorResponse(w, http.StatusUnauthorized, "Authorization header is required", nil)
-		return
-	}
-
-	// Remove "Bearer " prefix if present
-	if len(token) > 7 && token[:7] == "Bearer " {
-		token = token[7:]
-	}
-
-	info, err := h.tokenService.GetTokenInfo(token)
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusUnauthorized, "Failed to get token info", err)
-		return
-	}
-
-	h.writeSuccessResponse(w, http.StatusOK, info)
-}
-
-// writeSuccessResponse writes a successful JSON response
-func (h *TokenHandler) writeSuccessResponse(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-
-	response := models.APIResponse{
-		Success:   true,
-		Data:      data,
-		Timestamp: time.Now().UTC(),
-	}
-
-	json.NewEncoder(w).Encode(response)
-}
-
-// writeErrorResponse writes an error JSON response
-func (h *TokenHandler) writeErrorResponse(w http.ResponseWriter, status int, message string, err error) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-
-	errorMsg := message
-	if err != nil && h.config.Environment == "development" {
-		errorMsg = errorMsg + ": " + err.Error()
-	}
-
-	response := models.APIResponse{
-		Success:   false,
-		Error:     &errorMsg,
-		Timestamp: time.Now().UTC(),
-	}
-
-	json.NewEncoder(w).Encode(response)
+	json.NewEncoder(w).Encode(newToken)
 }
