@@ -28,9 +28,9 @@ func NewTokenHandler(cfg *config.Config) *TokenHandler {
 }
 
 type GenerateTokenRequest struct {
-	UserID   string        `json:"user_id"`
-	Role     string        `json:"role"`
-	Duration time.Duration `json:"duration"`
+	UserID   string `json:"user_id"`
+	Role     string `json:"role"`
+	Duration int    `json:"duration"` // Duration in seconds
 }
 
 type TokenResponse struct {
@@ -48,8 +48,8 @@ type ValidateTokenResponse struct {
 }
 
 type RefreshTokenRequest struct {
-	Token    string        `json:"token"`
-	Duration time.Duration `json:"duration"`
+	Token    string `json:"token"`
+	Duration int    `json:"duration"` // Duration in seconds
 }
 
 // CreateToken handles token generation requests
@@ -66,10 +66,11 @@ func (h *TokenHandler) CreateToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Duration == 0 {
-		req.Duration = 24 * time.Hour // Default to 24 hours if not specified
+		req.Duration = 24 * 60 * 60 // Default to 24 hours in seconds if not specified
 	}
 
-	token, err := h.manager.GenerateToken(req.UserID, req.Role, req.Duration)
+	duration := time.Duration(req.Duration) * time.Second
+	token, err := h.manager.GenerateToken(req.UserID, req.Role, duration)
 	if err != nil {
 		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
 		return
@@ -114,10 +115,11 @@ func (h *TokenHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Duration == 0 {
-		req.Duration = 24 * time.Hour // Default to 24 hours if not specified
+		req.Duration = 24 * 60 * 60 // Default to 24 hours in seconds if not specified
 	}
 
-	newToken, err := h.manager.RefreshToken(req.Token, req.Duration)
+	duration := time.Duration(req.Duration) * time.Second
+	newToken, err := h.manager.RefreshToken(req.Token, duration)
 	if err != nil {
 		http.Error(w, "Failed to refresh token", http.StatusBadRequest)
 		return
