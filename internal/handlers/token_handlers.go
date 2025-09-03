@@ -5,16 +5,25 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ARED-Group/dynamic-token-manager/internal/config"
 	"github.com/ARED-Group/dynamic-token-manager/internal/token"
 )
 
 type TokenHandler struct {
 	manager *token.TokenManager
+	config  *config.Config
 }
 
-func NewTokenHandler(manager *token.TokenManager) *TokenHandler {
+func NewTokenHandler(cfg *config.Config) *TokenHandler {
+	manager, err := token.NewTokenManager()
+	if err != nil {
+		// For now, we'll panic since this is a critical error
+		// In production, this should be handled more gracefully
+		panic("Failed to create token manager: " + err.Error())
+	}
 	return &TokenHandler{
 		manager: manager,
+		config:  cfg,
 	}
 }
 
@@ -43,8 +52,8 @@ type RefreshTokenRequest struct {
 	Duration time.Duration `json:"duration"`
 }
 
-// GenerateToken handles token generation requests
-func (h *TokenHandler) GenerateToken(w http.ResponseWriter, r *http.Request) {
+// CreateToken handles token generation requests
+func (h *TokenHandler) CreateToken(w http.ResponseWriter, r *http.Request) {
 	var req GenerateTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -117,4 +126,34 @@ func (h *TokenHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	response := TokenResponse{Token: newToken}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// RevokeToken handles token revocation requests (placeholder implementation)
+func (h *TokenHandler) RevokeToken(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement token revocation with blacklist/database
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Token revocation not yet implemented",
+		"status":  "pending",
+	})
+}
+
+// ListTokens lists active tokens (placeholder implementation)
+func (h *TokenHandler) ListTokens(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement token listing from database
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"tokens": []interface{}{},
+		"message": "Token listing not yet implemented",
+	})
+}
+
+// GetTokenInfo returns information about the current token
+func (h *TokenHandler) GetTokenInfo(w http.ResponseWriter, r *http.Request) {
+	// TODO: Extract token from context (set by JWT middleware)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Token info endpoint not yet implemented",
+		"status":  "pending",
+	})
 }
