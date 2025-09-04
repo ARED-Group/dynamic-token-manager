@@ -1,135 +1,71 @@
 package services
 
 import (
-	"fmt"
+	"context"
+	"sync"
 	"time"
 
-	"github.com/ARED-Group/dynamic-token-manager/internal/config"
+	"github.com/ARED-Group/dynamic-token-manager/config"
 	"github.com/ARED-Group/dynamic-token-manager/internal/github"
-	"github.com/ARED-Group/dynamic-token-manager/internal/models"
-	"github.com/golang-jwt/jwt/v5"
 )
 
+// TokenService manages GitHub installation tokens with a simple in-memory cache.
 type TokenService struct {
-	config    *config.Config
-	githubApp *github.App
+	cfg *config.Config
+	app *github.App
+
+	mu          sync.Mutex
+	cachedToken string
+	expiry      time.Time
 }
 
-func NewTokenService(cfg *config.Config) (*TokenService, error) {
-	var githubApp *github.App
-	var err error
-
-	if cfg.GitHubAppID != "" {
-		githubApp, err = github.NewApp(cfg.GitHubAppID, cfg.GitHubInstallationID, cfg.GitHubPrivateKeyPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create GitHub app: %w", err)
-		}
-	}
-
+// NewTokenService constructs a new TokenService.
+func NewTokenService(cfg *config.Config, app *github.App) *TokenService {
 	return &TokenService{
-		config:    cfg,
-		githubApp: githubApp,
-	}, nil
+		cfg: cfg,
+		app: app,
+	}
 }
 
-// GenerateToken creates a new JWT token
-func (s *TokenService) GenerateToken(req *models.TokenRequest) (*models.TokenResponse, error) {
-	now := time.Now()
-	expiry := now.Add(time.Duration(s.config.JWTExpirationMinutes) * time.Minute)
+// GetToken returns a cached token if valid, otherwise fetches a fresh installation token.
+func (s *TokenService) GetToken(ctx context.Context) (string, time.Time, error) {
+	s.mu.Lock()
+	token := s.cachedToken
+	exp := s.expiry
+	s.mu.Unlock()
 
-	claims := jwt.MapClaims{
-		"device_serial": req.DeviceSerial,
-		"token_type":    req.TokenType,
-		"scopes":        req.Scopes,
-		"iat":           now.Unix(),
-		"exp":           expiry.Unix(),
-		"iss":           "dynamic-token-manager",
+	// If token exists and is not about to expire, return it.
+	if token != "" && time.Until(exp) > 1*time.Minute {
+		return token, exp, nil
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(s.config.JWTSecret))
+	// Otherwise fetch a new token from GitHub App.
+	tr, err := s.app.GetInstallationToken()
 	if err != nil {
-		return nil, fmt.Errorf("failed to sign token: %w", err)
+		return "", time.Time{}, err
 	}
 
-	return &models.TokenResponse{
-		Token:     tokenString,
-		ExpiresAt: expiry,
-		TokenType: req.TokenType,
-		Scopes:    req.Scopes,
-	}, nil
+	var newExpiry time.Time
+	if !tr.ExpiresAt.IsZero() {
+		newExpiry = tr.ExpiresAt
+	} else if s.cfg != nil && s.cfg.TokenExpiration > 0 {
+		newExpiry = time.Now().Add(s.cfg.TokenExpiration)
+	} else {
+		newExpiry = time.Now().Add(50 * time.Minute)
+	}
+
+	s.mu.Lock()
+	s.cachedToken = tr.Token
+	s.expiry = newExpiry
+	s.mu.Unlock()
+
+	return tr.Token, newExpiry, nil
 }
 
-// ValidateToken validates a JWT token
-func (s *TokenService) ValidateToken(tokenString string) (*jwt.MapClaims, error) {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return []byte(s.config.JWTSecret), nil
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse token: %w", err)
-	}
-
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		return &claims, nil
-	}
-
-	return nil, fmt.Errorf("invalid token")
-}
-
-// GetGitHubRegistryToken gets a GitHub container registry token
-func (s *TokenService) GetGitHubRegistryToken(req *models.GitHubRegistryTokenRequest) (*models.GitHubRegistryTokenResponse, error) {
-	if s.githubApp == nil {
-		return nil, fmt.Errorf("GitHub App not configured")
-	}
-
-	// Get GitHub installation token
-	githubToken, err := s.githubApp.GetInstallationToken()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get GitHub token: %w", err)
-	}
-
-	return &models.GitHubRegistryTokenResponse{
-		Token:     githubToken.Token,
-		ExpiresAt: githubToken.ExpiresAt,
-		Registry:  s.config.RegistryURL,
-		Username:  s.config.RegistryUsername,
-	}, nil
-}
-
-// RefreshToken refreshes an existing token
-func (s *TokenService) RefreshToken(tokenString string) (*models.TokenResponse, error) {
-	claims, err := s.ValidateToken(tokenString)
-	if err != nil {
-		return nil, fmt.Errorf("invalid token for refresh: %w", err)
-	}
-
-	// Extract device serial from existing token
-	deviceSerial, ok := (*claims)["device_serial"].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid device serial in token")
-	}
-
-	// Extract scopes
-	scopesInterface, ok := (*claims)["scopes"]
-	var scopes []string
-	if ok && scopesInterface != nil {
-		if scopesList, ok := scopesInterface.([]interface{}); ok {
-			for _, scope := range scopesList {
-				if scopeStr, ok := scope.(string); ok {
-					scopes = append(scopes, scopeStr)
-				}
-			}
-		}
-	}
-
-	// Generate new token
-	return s.GenerateToken(&models.TokenRequest{
-		DeviceSerial: deviceSerial,
-		TokenType:    "refresh",
-		Scopes:       scopes,
-	})
+// Invalidate clears the cached token.
+func (s *TokenService) Invalidate() {
+	s.mu.Lock()
+	s.cachedToken = ""
+	s.expiry = time.Time{}
+	s.mu.Unlock()
 }
