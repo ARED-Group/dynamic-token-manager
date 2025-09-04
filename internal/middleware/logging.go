@@ -6,27 +6,24 @@ import (
 	"time"
 )
 
-// LoggingMiddleware logs HTTP requests
-func LoggingMiddleware(next http.Handler) http.Handler {
+// Logging is a simple HTTP middleware that logs method, path, status and duration.
+func Logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		
-		// Create a response writer wrapper to capture status code
-		wrapper := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-		
-		next.ServeHTTP(wrapper, r)
-		
+		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rw, r)
 		duration := time.Since(start)
-		log.Printf("%s %s %d %v", r.Method, r.URL.Path, wrapper.statusCode, duration)
+		log.Printf("%s %s %d %s", r.Method, r.URL.Path, rw.status, duration)
 	})
 }
 
+// responseWriter wraps http.ResponseWriter to capture status code
 type responseWriter struct {
 	http.ResponseWriter
-	statusCode int
+	status int
 }
 
-func (rw *responseWriter) WriteHeader(code int) {
-	rw.statusCode = code
-	rw.ResponseWriter.WriteHeader(code)
+func (rw *responseWriter) WriteHeader(status int) {
+	rw.status = status
+	rw.ResponseWriter.WriteHeader(status)
 }
