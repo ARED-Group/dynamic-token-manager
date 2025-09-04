@@ -1,8 +1,6 @@
 package services
 
 import (
-	"fmt"
-
 	"github.com/ARED-Group/dynamic-token-manager/internal/config"
 	"github.com/ARED-Group/dynamic-token-manager/internal/models"
 )
