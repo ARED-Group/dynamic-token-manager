@@ -30,3 +30,8 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
 }
+
+// Logging returns the LoggingMiddleware for easier usage in routes
+func Logging() func(http.Handler) http.Handler {
+	return LoggingMiddleware
+}

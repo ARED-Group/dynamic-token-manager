@@ -31,7 +31,12 @@ func SetupRoutes(router *mux.Router, cfg *config.Config) error {
 	rateLimiter := middleware.NewRateLimiter(time.Minute, time.Hour)
 	
 	// Global middleware
-	router.Use(middleware.CORS())
+	corsConfig := middleware.CORSConfig{
+		AllowedOrigins: cfg.CORSAllowedOrigins,
+		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders: []string{"Content-Type", "Authorization", "X-Device-Serial"},
+	}
+	router.Use(middleware.CORSWithConfig(corsConfig))
 	router.Use(middleware.Logging())
 	router.Use(rateLimiter.RateLimitMiddleware(cfg.RateLimitPerMinute))
 	router.Use(middleware.RequestID())
@@ -39,6 +44,12 @@ func SetupRoutes(router *mux.Router, cfg *config.Config) error {
 	// Health check endpoints (no auth required)
 	router.HandleFunc("/health", healthHandler.Health).Methods("GET")
 	router.HandleFunc("/ready", healthHandler.Ready).Methods("GET")
+	
+	// Global OPTIONS handler for CORS preflight
+	router.Methods("OPTIONS").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// CORS headers are already set by the middleware
+		w.WriteHeader(http.StatusOK)
+	})
 	
 	// API version prefix
 	api := router.PathPrefix("/api/v1").Subrouter()

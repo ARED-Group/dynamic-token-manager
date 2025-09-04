@@ -6,9 +6,7 @@ import (
 	"strings"
 
 	"github.com/ARED-Group/dynamic-token-manager/internal/config"
-	"github.com/ARED-Group/dynamic-token-manager/internal/models"
 	"github.com/ARED-Group/dynamic-token-manager/internal/services"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 type AuthMiddleware struct {

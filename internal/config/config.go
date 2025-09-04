@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -13,6 +14,9 @@ type Config struct {
 	Port                    string
 	Environment             string
 	LogLevel                string
+	ServerReadTimeout       int
+	ServerWriteTimeout      int
+	ServerIdleTimeout       int
 
 	// Database Configuration
 	DatabaseURL             string
@@ -48,6 +52,9 @@ type Config struct {
 	// Container Registry Configuration - NEW SECTION
 	RegistryURL             string
 	RegistryUsername        string
+	
+	// CORS Configuration
+	CORSAllowedOrigins      []string
 }
 
 // Load reads configuration from environment variables with defaults
@@ -57,6 +64,9 @@ func Load() *Config {
 		Port:                   getEnv("PORT", "8080"),
 		Environment:            getEnv("ENVIRONMENT", "development"),
 		LogLevel:               getEnv("LOG_LEVEL", "info"),
+		ServerReadTimeout:      getIntEnv("SERVER_READ_TIMEOUT", 15),
+		ServerWriteTimeout:     getIntEnv("SERVER_WRITE_TIMEOUT", 15),
+		ServerIdleTimeout:      getIntEnv("SERVER_IDLE_TIMEOUT", 60),
 
 		// Database Configuration
 		DatabaseURL:            getEnv("DATABASE_URL", "postgres://localhost/token_manager?sslmode=disable"),
@@ -92,6 +102,9 @@ func Load() *Config {
 		// Container Registry Configuration - NEW
 		RegistryURL:            getEnv("REGISTRY_URL", "ghcr.io"),
 		RegistryUsername:       getEnv("REGISTRY_USERNAME", "ared-group"),
+		
+		// CORS Configuration
+		CORSAllowedOrigins:     getStringSliceEnv("CORS_ALLOWED_ORIGINS", []string{"*"}),
 	}
 }
 
@@ -158,6 +171,24 @@ func getDurationEnv(key string, fallback time.Duration) time.Duration {
 	if value := os.Getenv(key); value != "" {
 		if duration, err := time.ParseDuration(value); err == nil {
 			return duration
+		}
+	}
+	return fallback
+}
+
+// getStringSliceEnv gets a string slice environment variable with a fallback value
+func getStringSliceEnv(key string, fallback []string) []string {
+	if value := os.Getenv(key); value != "" {
+		// Split by comma and trim spaces
+		var result []string
+		for _, item := range strings.Split(value, ",") {
+			trimmed := strings.TrimSpace(item)
+			if trimmed != "" {
+				result = append(result, trimmed)
+			}
+		}
+		if len(result) > 0 {
+			return result
 		}
 	}
 	return fallback

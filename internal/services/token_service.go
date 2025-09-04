@@ -35,7 +35,7 @@ func NewTokenService(cfg *config.Config) (*TokenService, error) {
 // GenerateToken creates a new JWT token
 func (s *TokenService) GenerateToken(req *models.TokenRequest) (*models.TokenResponse, error) {
 	now := time.Now()
-	expiry := now.Add(time.Duration(s.config.JWTExpirationMinutes) * time.Minute)
+	expiry := now.Add(s.config.TokenExpiration)
 
 	claims := jwt.MapClaims{
 		"device_serial": req.DeviceSerial,

@@ -2,20 +2,33 @@ package github
 
 import (
     "crypto/rsa"
-    "encoding/base64"
     "encoding/json"
     "fmt"
     "io/ioutil"
     "net/http"
-    "os"
     "time"
 
-    "github.com/dgrijalva/jwt-go"
+    "github.com/golang-jwt/jwt/v5"
 )
 
 type App struct {
-    AppID      string
-    PrivateKey *rsa.PrivateKey
+    AppID          string
+    InstallationID string
+    PrivateKey     *rsa.PrivateKey
+}
+
+// NewApp creates a new GitHub App instance
+func NewApp(appID, installationID, privateKeyPath string) (*App, error) {
+    privateKey, err := LoadPrivateKey(privateKeyPath)
+    if err != nil {
+        return nil, fmt.Errorf("failed to load private key: %w", err)
+    }
+    
+    return &App{
+        AppID:          appID,
+        InstallationID: installationID,
+        PrivateKey:     privateKey,
+    }, nil
 }
 
 // LoadPrivateKey loads the private key from a file.
@@ -34,9 +47,9 @@ func LoadPrivateKey(filePath string) (*rsa.PrivateKey, error) {
 // GenerateJWT generates a JWT token for the GitHub App.
 func (app *App) GenerateJWT() (string, error) {
     now := time.Now()
-    claims := &jwt.StandardClaims{
-        IssuedAt:  now.Unix(),
-        ExpiresAt: now.Add(10 * time.Minute).Unix(), // JWT expiration time
+    claims := &jwt.RegisteredClaims{
+        IssuedAt:  jwt.NewNumericDate(now),
+        ExpiresAt: jwt.NewNumericDate(now.Add(10 * time.Minute)), // JWT expiration time
         Subject:   app.AppID,
     }
 
@@ -84,4 +97,24 @@ func (app *App) FetchInstallationToken(installationID string) (string, error) {
         return "", fmt.Errorf("token not found in response")
     }
     return token, nil
+}
+
+// GitHubTokenResponse represents a GitHub token response
+type GitHubTokenResponse struct {
+    Token     string    `json:"token"`
+    ExpiresAt time.Time `json:"expires_at"`
+}
+
+// GetInstallationToken gets the installation token with structured response
+func (app *App) GetInstallationToken() (*GitHubTokenResponse, error) {
+    token, err := app.FetchInstallationToken(app.InstallationID)
+    if err != nil {
+        return nil, err
+    }
+    
+    // GitHub tokens typically expire in 1 hour
+    return &GitHubTokenResponse{
+        Token:     token,
+        ExpiresAt: time.Now().Add(time.Hour),
+    }, nil
 }
